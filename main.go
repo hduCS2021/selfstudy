@@ -1,21 +1,28 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/BaiMeow/SimpleBot/bot"
 	"github.com/BaiMeow/SimpleBot/driver"
 	"github.com/BaiMeow/SimpleBot/message"
 	"github.com/hduCS2021/selfstudy/data"
 	"github.com/spf13/viper"
+	"html/template"
 	"log"
 	"time"
 )
 
+var DailyLeavesTmpl = template.Must(template.New("DailyLeaves").Parse(`今日请假名单{{ range $name,$reason :=  . }}
+{{ $name }}:{{ $reason }}
+{{ end }}`))
+
 var b *bot.Bot
 
 const help = `夜自修自助请假功能介绍：
-①临时请假 “夜自修请假 <reason>”
+①临时请假，仅可请假当天 “夜自修请假 <reason>”
 ②长期请假 “夜自修长期请假 <周几，可填'周一'，'周二'...’周日‘> <请假原因> <可填单周/双周，不填表示都请假>”
+③调取班级今日请假记录 “今日请假” 
 `
 
 var week = []string{"周一", "周二", "周三", "周四", "周五", "周六", "周日"}
@@ -71,12 +78,6 @@ func handlePrivateMsg(_ int32, UserID int64, Msg message.Msg) bool {
 		return false
 	}
 	msgs := Msg.Fields()
-	if len(msgs) == 1 && msgs[0].GetType() == "text" && msgs[0].(message.Text).Text == "帮助" {
-		if _, err := b.SendPrivateMsg(UserID, message.New().Text(help)); err != nil {
-			log.Println(err)
-		}
-		return true
-	}
 	if msgs[0].GetType() != "text" {
 		return false
 	}
@@ -88,8 +89,9 @@ func handlePrivateMsg(_ int32, UserID int64, Msg message.Msg) bool {
 		}
 		reason := msgs[1].(message.Text).Text
 		now := time.Now()
-		if err := data.AddLeaveByQQ(UserID, reason, time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())); err != nil {
+		if err := data.AddTempLeaveByQQ(UserID, reason, time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())); err != nil {
 			rec(fmt.Sprintf("数据库错误：%v", err))
+			return true
 		}
 		t := now.Format("2006年1月2日")
 		rec(fmt.Sprintf("请假成功:\n时间:%s\n原因:%s", t, reason))
@@ -133,6 +135,55 @@ func handlePrivateMsg(_ int32, UserID int64, Msg message.Msg) bool {
 			return false
 		}
 		rec(fmt.Sprintf("请假成功：\n时间：%s %s\n原因：%s", week[weekdayN-1], singleWeek[single], reason))
+	case "今日请假":
+		if len(msgs) != 1 {
+			rec(cmdError("如果想查询班级今日请假信息不要输入额外的东西"))
+			return true
+		}
+		leaves, err := data.QueryTodayLeaves()
+		if err != nil {
+			rec(fmt.Sprintf("数据库错误：%v", err))
+			log.Println(err)
+			return true
+		}
+		if len(leaves) == 0 {
+			rec("今日暂无请假记录")
+			return true
+		}
+
+		list := make(map[string]string)
+		for _, v := range leaves {
+			stu, err := v.GetStu()
+			if err != nil {
+				rec(fmt.Sprintf("数据库错误：%v", err))
+				log.Println(err)
+			}
+
+			if _, ok := list[stu.Name]; ok {
+				//优先展示长时间请假
+				if _, ok := v.(data.LongLeave); ok {
+					list[stu.Name] = v.GetReason()
+				}
+				continue
+			}
+			list[stu.Name] = v.GetReason()
+
+		}
+		buffer := new(bytes.Buffer)
+		if err := DailyLeavesTmpl.Execute(buffer, list); err != nil {
+			rec(fmt.Sprintf("模板解析错误：%v", err))
+			log.Println(err)
+		}
+		rec(buffer.String())
+
+	case "帮助":
+		if len(msgs) != 1 {
+			rec(cmdError("如果想查询帮助信息不要输入额外的东西"))
+			return true
+		}
+		rec(help)
+		return true
+
 	}
 	return true
 }
@@ -142,9 +193,13 @@ func cmdError(reason string) string {
 }
 
 func AutoAccept(request *bot.FriendRequest) bool {
-	if data.CheckQQ(request.UserID) {
-		request.Agree("")
+	if !data.CheckQQ(request.UserID) {
+		return false
+	}
+	request.Agree("")
+	if _, err := b.SendPrivateMsg(request.UserID, message.New().Text(help)); err != nil {
+		log.Println(err)
 		return true
 	}
-	return false
+	return true
 }

@@ -1,16 +1,24 @@
 package data
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
 
-func AddLeaveByQQ(qq int64, reason string, leaveDay time.Time) error {
+func AddTempLeaveByQQ(qq int64, reason string, leaveDay time.Time) error {
 	stu := getStuByQQ(qq)
 	if stu.StudentId == 0 {
 		return fmt.Errorf("can't find student")
 	}
-	leave := &Leave{StudentId: getStuByName(stu.Name).StudentId, Reason: reason, LeaveDay: leaveDay}
+	left, err := IsTodayLeaveByID(stu.StudentId)
+	if err != nil {
+		return err
+	}
+	if left {
+		return errors.New("已经请假过了")
+	}
+	leave := &TempLeave{StudentId: getStuByName(stu.Name).StudentId, Reason: reason, LeaveDay: leaveDay}
 	if errs := db.Create(leave).GetErrors(); len(errs) != 0 {
 		return errs2err(errs)
 	}
@@ -25,8 +33,8 @@ func AddLongLeaveByQQ(qq int64, reason string, weekday int, single int) error {
 	leave := LongLeave{
 		StudentId: stu.StudentId,
 		Reason:    reason,
-		WeekDay:   weekday,
-		Single:    single,
+		WeekDay:   int32(weekday),
+		Single:    int32(single),
 	}
 
 	if errs := db.Create(&leave).GetErrors(); len(errs) != 0 {
