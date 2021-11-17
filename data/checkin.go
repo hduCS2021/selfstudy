@@ -14,8 +14,8 @@ func AddCheckinByID(id int32) error {
 	if c.Student.StudentId == id && sameDay(t, c.CheckinAt) {
 		return ErrRepeat
 	}
-	return errs2err(db.Create(&Checkin{
+	return db.Create(&Checkin{
 		StudentId: id,
 		CheckinAt: t,
-	}).GetErrors())
+	}).Error
 }

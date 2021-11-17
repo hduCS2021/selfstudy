@@ -4,16 +4,16 @@ import "log"
 
 func getStuByQQ(qq int64) *Student {
 	stu := Student{}
-	if errs := db.First(&stu, "qq = ?", qq).GetErrors(); len(errs) != 0 {
-		log.Fatalln(errs)
+	if err := db.First(&stu, "qq = ?", qq).Error; err != nil {
+		log.Fatalln(err)
 	}
 	return &stu
 }
 
 func getStuByName(name string) *Student {
 	stu := Student{}
-	if errs := db.First(&stu, "name = ?", name).GetErrors(); len(errs) != 0 {
-		log.Fatalln(errs)
+	if err := db.First(&stu, "name = ?", name).Error; err != nil {
+		log.Fatalln(err)
 	}
 	return &stu
 }

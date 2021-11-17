@@ -2,8 +2,8 @@ package data
 
 import (
 	"fmt"
-	"github.com/jinzhu/gorm"
-	_ "github.com/jinzhu/gorm/dialects/mysql"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 	"time"
 )
 
@@ -24,8 +24,8 @@ type TempLeave struct {
 
 func (l TempLeave) GetStu() (*Student, error) {
 	stu := Student{}
-	if errs := db.First(&stu, l.StudentId).GetErrors(); len(errs) != 0 {
-		return nil, errs2err(errs)
+	if err := db.First(&stu, l.StudentId).Error; err != nil {
+		return nil, err
 	}
 	return &stu, nil
 }
@@ -36,17 +36,17 @@ func (l TempLeave) GetReason() string {
 
 type LongLeave struct {
 	Student   Student `gorm:"foreignKey:StudentId"`
-	StudentId int32   `gorm:"unique_index:one_leave_one_day"`
+	StudentId int32   `gorm:"uniqueIndex:one_leave_one_day"`
 	Reason    string
-	WeekDay   int32 `gorm:"unique_index:one_leave_one_day"`
-	Single    int32 `gorm:"unique_index:one_leave_one_day"`
+	WeekDay   int32 `gorm:"uniqueIndex:one_leave_one_day"`
+	Single    int32 `gorm:"uniqueIndex:one_leave_one_day"`
 	gorm.Model
 }
 
 func (l LongLeave) GetStu() (*Student, error) {
 	stu := Student{}
-	if err := db.First(&stu, l.StudentId).GetErrors(); len(err) != 0 {
-		return nil, errs2err(err)
+	if err := db.First(&stu, l.StudentId).Error; err != nil {
+		return nil, err
 	}
 	return &stu, nil
 }
@@ -57,7 +57,7 @@ func (l LongLeave) GetReason() string {
 
 type Student struct {
 	Name       string
-	StudentId  int32 `gorm:"primary_key"`
+	StudentId  int32 `gorm:"primaryKey"`
 	QQ         int64
 	Permission int32
 }
@@ -69,29 +69,29 @@ type Checkin struct {
 }
 
 func InitDB(source string) error {
-	database, err := gorm.Open("mysql", source)
+	database, err := gorm.Open(mysql.Open(source), &gorm.Config{})
 	if err != nil {
 		return err
 	}
 	db = database
-	if !db.HasTable(&Student{}) {
-		if errs := database.CreateTable(&Student{}).GetErrors(); len(errs) != 0 {
-			return fmt.Errorf("can't create database:%v", errs2err(errs))
+	if !db.Migrator().HasTable(&Student{}) {
+		if err := database.Migrator().CreateTable(&Student{}).Error(); err != "" {
+			return fmt.Errorf("can't create database:%v", err)
 		}
 	}
-	if !db.HasTable(&TempLeave{}) {
-		if errs := database.CreateTable(&TempLeave{}).GetErrors(); len(errs) != 0 {
-			return fmt.Errorf("can't create database:%v", errs2err(errs))
+	if !db.Migrator().HasTable(&TempLeave{}) {
+		if err := database.Migrator().CreateTable(&TempLeave{}).Error(); err != "" {
+			return fmt.Errorf("can't create database:%v", err)
 		}
 	}
-	if !db.HasTable(&LongLeave{}) {
-		if errs := database.CreateTable(&LongLeave{}).GetErrors(); len(errs) != 0 {
-			return fmt.Errorf("can't create database:%v", errs2err(errs))
+	if !db.Migrator().HasTable(&LongLeave{}) {
+		if err := database.Migrator().CreateTable(&LongLeave{}).Error(); err != "" {
+			return fmt.Errorf("can't create database:%v", err)
 		}
 	}
-	if !db.HasTable(&Checkin{}) {
-		if errs := database.CreateTable(&Checkin{}).GetErrors(); len(errs) != 0 {
-			return fmt.Errorf("can't create database:%v", errs2err(errs))
+	if !db.Migrator().HasTable(&Checkin{}) {
+		if err := database.Migrator().CreateTable(&Checkin{}).Error(); err != "" {
+			return fmt.Errorf("can't create database:%v", err)
 		}
 	}
 	return nil

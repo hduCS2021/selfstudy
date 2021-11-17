@@ -13,16 +13,22 @@ import (
 	"time"
 )
 
-var DailyLeavesTmpl = template.Must(template.New("DailyLeaves").Parse(`今日请假名单{{ range $name,$reason :=  . }}
-{{ $name }}:{{ $reason }}
+var DailyLeavesTmpl = template.Must(template.New("DailyLeaves").Parse(`今日请假名单:
+{{ range $name,$reason :=  . }}{{ $name }}:{{ $reason }}
+{{ end }}`))
+
+var DailyArriveTmpl = template.Must(template.New("DailyArriveTmpl").Parse(`今日应到名单:
+{{ range . }}{{ .Name }}
 {{ end }}`))
 
 var b *bot.Bot
 
 const help = `夜自修自助请假功能介绍：
-①临时请假，仅可请假当天 “夜自修请假 <reason>”
+①临时请假，仅可请假当天 “夜自修请假 <请假原因>”
 ②长期请假 “夜自修长期请假 <周几，可填'周一'，'周二'...’周日‘> <请假原因> <可填单周/双周，不填表示都请假>”
-③调取班级今日请假记录 “今日请假” 
+③调取班级今日请假记录 “今日请假”
+④调取班级今日应到 “今日应到”
+⑤列出自己的所有请假 “我的请假”
 `
 
 var week = []string{"周一", "周二", "周三", "周四", "周五", "周六", "周日"}
@@ -83,109 +89,17 @@ func handlePrivateMsg(_ int32, UserID int64, Msg message.Msg) bool {
 	}
 	switch msgs[0].(message.Text).Text {
 	case "夜自修请假":
-		if len(msgs) != 2 && msgs[1].GetType() != "text" {
-			rec(cmdError("缺少请假原因"))
-			return true
-		}
-		reason := msgs[1].(message.Text).Text
-		now := time.Now()
-		if err := data.AddTempLeaveByQQ(UserID, reason, time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())); err != nil {
-			rec(fmt.Sprintf("数据库错误：%v", err))
-			return true
-		}
-		t := now.Format("2006年1月2日")
-		rec(fmt.Sprintf("请假成功:\n时间:%s\n原因:%s", t, reason))
+		return handleTempLeave(UserID, msgs, rec)
 	case "夜自修长期请假":
-		if len(msgs) < 2 || msgs[1].GetType() != "text" {
-			rec(cmdError("缺少请假时间"))
-			return true
-		}
-		weekday := msgs[1].(message.Text).Text
-		weekdayN := 0
-		for i, v := range week {
-			if weekday == v {
-				weekdayN = i + 1
-				break
-			}
-		}
-		if weekdayN == 0 {
-			rec(cmdError("请假时间无效"))
-			return true
-		}
-		if len(msgs) < 3 || msgs[2].GetType() != "text" {
-			rec(cmdError("缺少请假原因"))
-			return true
-		}
-		reason := msgs[2].(message.Text).Text
-		var single = 0
-		if len(msgs) >= 4 && msgs[3].GetType() == "text" {
-			kind := msgs[3].(message.Text).Text
-			switch kind {
-			case "单周":
-				single = 1
-			case "双周":
-				single = 2
-			default:
-				rec(cmdError("要不填单周要不填双周要不就不填，不要填奇奇怪怪的东西上来"))
-				return true
-			}
-		}
-		if err := data.AddLongLeaveByQQ(UserID, reason, weekdayN, single); err != nil {
-			rec(fmt.Sprintf("数据库错误：%v", err))
-			return false
-		}
-		rec(fmt.Sprintf("请假成功：\n时间：%s %s\n原因：%s", week[weekdayN-1], singleWeek[single], reason))
+		return handleLongLeave(UserID, msgs, rec)
 	case "今日请假":
-		if len(msgs) != 1 {
-			rec(cmdError("如果想查询班级今日请假信息不要输入额外的东西"))
-			return true
-		}
-		leaves, err := data.QueryTodayLeaves()
-		if err != nil {
-			rec(fmt.Sprintf("数据库错误：%v", err))
-			log.Println(err)
-			return true
-		}
-		if len(leaves) == 0 {
-			rec("今日暂无请假记录")
-			return true
-		}
-
-		list := make(map[string]string)
-		for _, v := range leaves {
-			stu, err := v.GetStu()
-			if err != nil {
-				rec(fmt.Sprintf("数据库错误：%v", err))
-				log.Println(err)
-			}
-
-			if _, ok := list[stu.Name]; ok {
-				//优先展示长时间请假
-				if _, ok := v.(data.LongLeave); ok {
-					list[stu.Name] = v.GetReason()
-				}
-				continue
-			}
-			list[stu.Name] = v.GetReason()
-
-		}
-		buffer := new(bytes.Buffer)
-		if err := DailyLeavesTmpl.Execute(buffer, list); err != nil {
-			rec(fmt.Sprintf("模板解析错误：%v", err))
-			log.Println(err)
-		}
-		rec(buffer.String())
-
+		return handleDailyLeave(UserID, msgs, rec)
+	case "今日应到":
+		return handleDailyArrive(UserID, msgs, rec)
 	case "帮助":
-		if len(msgs) != 1 {
-			rec(cmdError("如果想查询帮助信息不要输入额外的东西"))
-			return true
-		}
-		rec(help)
-		return true
-
+		return handleHelp(UserID, msgs, rec)
 	}
-	return true
+	return false
 }
 
 func cmdError(reason string) string {
@@ -202,4 +116,137 @@ func AutoAccept(request *bot.FriendRequest) bool {
 		return true
 	}
 	return true
+}
+
+func handleTempLeave(UserID int64, msgs message.Msg, rec func(string)) bool {
+	if len(msgs) != 2 && msgs[1].GetType() != "text" {
+		rec(cmdError("缺少请假原因"))
+		return true
+	}
+	reason := msgs[1].(message.Text).Text
+	now := time.Now()
+	if err := data.AddTempLeaveByQQ(UserID, reason, time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())); err != nil {
+		rec(fmt.Sprintf("数据库错误：%v", err))
+		return true
+	}
+	t := now.Format("2006年1月2日")
+	rec(fmt.Sprintf("请假成功:\n时间:%s\n原因:%s", t, reason))
+	return true
+}
+
+func handleLongLeave(UserID int64, msgs message.Msg, rec func(string2 string)) bool {
+	if len(msgs) < 2 || msgs[1].GetType() != "text" {
+		rec(cmdError("缺少请假时间"))
+		return true
+	}
+	weekday := msgs[1].(message.Text).Text
+	weekdayN := 0
+	for i, v := range week {
+		if weekday == v {
+			weekdayN = i + 1
+			break
+		}
+	}
+	if weekdayN == 0 {
+		rec(cmdError("请假时间无效"))
+		return true
+	}
+	if len(msgs) < 3 || msgs[2].GetType() != "text" {
+		rec(cmdError("缺少请假原因"))
+		return true
+	}
+	reason := msgs[2].(message.Text).Text
+	var single = 0
+	if len(msgs) >= 4 && msgs[3].GetType() == "text" {
+		kind := msgs[3].(message.Text).Text
+		switch kind {
+		case "单周":
+			single = 1
+		case "双周":
+			single = 2
+		default:
+			rec(cmdError("要不填单周要不填双周要不就不填，不要填奇奇怪怪的东西上来"))
+			return true
+		}
+	}
+	if err := data.AddLongLeaveByQQ(UserID, reason, weekdayN, single); err != nil {
+		rec(fmt.Sprintf("数据库错误：%v", err))
+		return false
+	}
+	rec(fmt.Sprintf("请假成功：\n时间：%s %s\n原因：%s", week[weekdayN-1], singleWeek[single], reason))
+	return true
+}
+
+func handleDailyLeave(_ int64, msgs message.Msg, rec func(string)) bool {
+	if len(msgs) != 1 {
+		rec(cmdError("如果想查询班级今日请假信息不要输入额外的东西"))
+		return true
+	}
+	leaves, err := data.QueryTodayLeaves()
+	if err != nil {
+		rec(fmt.Sprintf("数据库错误：%v", err))
+		log.Println(err)
+		return true
+	}
+	if len(leaves) == 0 {
+		rec("今日暂无请假记录")
+		return true
+	}
+
+	list := make(map[string]string)
+	for _, v := range leaves {
+		stu, err := v.GetStu()
+		if err != nil {
+			rec(fmt.Sprintf("数据库错误：%v", err))
+			log.Println(err)
+		}
+
+		if _, ok := list[stu.Name]; ok {
+			//优先展示长时间请假
+			if _, ok := v.(data.LongLeave); ok {
+				list[stu.Name] = v.GetReason()
+			}
+			continue
+		}
+		list[stu.Name] = v.GetReason()
+
+	}
+	buffer := new(bytes.Buffer)
+	if err := DailyLeavesTmpl.Execute(buffer, list); err != nil {
+		rec(fmt.Sprintf("模板渲染错误：%v", err))
+		log.Println(err)
+	}
+	rec(buffer.String())
+	return true
+}
+
+func handleDailyArrive(_ int64, msgs message.Msg, rec func(string)) bool {
+	if len(msgs) != 1 {
+		rec(cmdError("如果想查询今日应到不要输入额外的东西"))
+		return true
+	}
+	list, err := data.QueryShouldArrive()
+	if err != nil {
+		rec(fmt.Sprintf("数据库错误：%v", err))
+		log.Println(err)
+		return true
+	}
+	reply := new(bytes.Buffer)
+	if err := DailyArriveTmpl.Execute(reply, list); err != nil {
+		rec(fmt.Sprintf("模板渲染错误：%v", err))
+		log.Println(err)
+		return true
+	}
+	rec(reply.String())
+	return true
+}
+
+func handleHelp(_ int64, msgs message.Msg, rec func(string)) bool {
+	if len(msgs) != 1 {
+		rec(cmdError("如果想查询帮助信息不要输入额外的东西"))
+		return true
+	}
+	rec(help)
+	return true
+
 }

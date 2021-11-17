@@ -17,11 +17,12 @@ func initTest(t *testing.T) {
 
 func TestQueryLeaveByID(t *testing.T) {
 	initTest(t)
-	leaves, err := QueryLeaveByID(21181305)
+	leaves, err := QueryLeaveByID(21011631)
 	if err != nil {
 		t.Error(err)
+		return
 	}
-	t.Log(leaves[0])
+	t.Log(leaves)
 }
 
 func TestQueryTodayLeaves(t *testing.T) {
@@ -33,11 +34,11 @@ func TestQueryTodayLeaves(t *testing.T) {
 	t.Log(leaves)
 }
 
-func TestIsTodayLeaveByID(t *testing.T) {
+func TestQueryShouldArrive(t *testing.T) {
 	initTest(t)
-	yes, err := IsTodayLeaveByID(21181305)
+	list, err := QueryShouldArrive()
+	t.Log(list)
 	if err != nil {
 		t.Error(err)
 	}
-	t.Log(yes)
 }
